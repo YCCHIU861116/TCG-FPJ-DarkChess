@@ -105,48 +105,35 @@ bool CDCagent::showboard ( const char* data[], char* response){
 	return 0;
 }
 //----------------------------------------------utility provided----------------------------------------------
+
+const char chess_name[17] = "-KGMRNCPXkgmrncp";
 int GetFin(char c) {
-	static const char skind[]={'-','K','G','M','R','N','C','P','X','k','g','m','r','n','c','p'};
 	for(int f=0;f<16;f++){ 
-		if(c==skind[f]) {
+		if(c==chess_name[f]) {
 			return f;
 		}
 	}
 	return -1;
 }
-int CDCagent::ConvertChessNo(int input) { // into self-define id for IsLegal
-	switch(input) {
-		case 0: return CHESS_EMPTY; break; case 8: return CHESS_COVER; break;
-		case 1: return   6; break; case 2: return   5; break;
-		case 3: return   4; break; case 4: return   3; break;
-		case 5: return   2; break; case 6: return   1; break;
-		case 7: return   0; break; case 9: return  13; break;
-		case 10: return 12; break; case 11: return 11; break;
-		case 12: return 10; break; case 13: return 9; break;
-		case 14: return 8; break; case 15: return 7; break;
-	}
-	return -1;
-}
-const char pieceChar[20][5] = { 
-	"-",
-	"K","G","M","R","N","C","P",
-	"X",
-	"k","g","m","r","n","c","p"
-};
+const int div4[32] = {0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7,7,7};
+const int mod4[32] = {0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3};
+const int div8[32] = {0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3};
+const int mod8[32] = {0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7};
 void CDCagent::initBoardState () {
 	// initial board
 	char iCurrentPosition[32];
 	for(int i = 0; i < 32; i++){ iCurrentPosition[i] = 'X'; }
 	int iPieceCount[14] = {1, 2, 2, 2, 2, 2, 5, 1, 2, 2, 2, 2, 2, 5};
 
-	fprintf(stderr, "\niPieceCount[14]:\n");
+	fprintf(stderr, "iPieceCount[14]:\n");
 	for(int i=0;i<14;i++) {
-		fprintf(stderr, "[ %s ]",pieceChar[i]); 
+		fprintf(stderr, "[ %c ]",chess_name[i]); 
 	} fprintf(stderr, "\n");
 	for(int i=0;i<14;i++) {
-		printf("%4d",iPieceCount[i]); 
+		fprintf(stderr,"%4d",iPieceCount[i]); 
 	} fprintf(stderr, "\n");
-	puts("iCurrentPosition[32]:");
+	fprintf(stderr,"iCurrentPosition[32]:\n");
+	puts("Let's start!");
 	for(int i=28;i>=0;i-=4){
 		for(int j=0;j<4;j++) {
 			fprintf(stderr, "%2c ",iCurrentPosition[i+j]);
@@ -160,28 +147,32 @@ void CDCagent::initBoardState () {
 		}
 	} fprintf(stderr, "\n"); 
 	fprintf(stderr, "\n\n\n");
+
 	memcpy(this->CloseChess,iPieceCount,sizeof(int)*14);
 	//convert to my format
-	int Index = 0;
-	for(int i=0;i<8;i++) { for(int j=0;j<4;j++) {
-		this->Board[Index] = ConvertChessNo(GetFin(iCurrentPosition[Index]));
-		Index++;
-	}}
+	for(int i = 0; i < 4; i++){
+		this->Board[i] = 0;
+		for(int j = 0; j < 8; j++){
+			this->Board[i] += (1 << 4*j+3);
+		}
+	}
+	fprintf(stderr, "init:%u\n", this->Board[3]);
 	Print_Chessboard();
 }
 // apply move to the board 
 void CDCagent::MakeMove(const char move[6]) { 
 	int src, dst;
-	src = ('8'-move[1])*4+(move[0]-'a');
+	src = (move[1]-'1')*4+(move[0]-'a');
+	fprintf(stderr, "%d\n", src);
 	if(move[2]=='('){ 
-		fprintf(stderr, "FLIP: %c%c = %s\n",move[0], move[1], pieceChar[GetFin(move[3])]); 
-		this->Board[src] = ConvertChessNo(GetFin(move[3]));
+		fprintf(stderr, "FLIP: %c%c = %c\n",move[0], move[1], move[3]); 
+		modify(this->Board,src,GetFin(move[3]));
 		Print_Chessboard();
 	}else { 
-		dst = ('8'-move[4])*4+(move[3]-'a');
+		dst = (move[4]-'1')*4+(move[3]-'a');
 		fprintf(stderr, "MOVE: %c%c - %c%c\n",move[0], move[1], move[3], move[4]); 
-		this->Board[dst] = this->Board[src];
-		this->Board[src] = CHESS_EMPTY;
+		modify(this->Board,dst,locate(this->Board,src));
+		modify(this->Board,src,CHESS_EMPTY);
 		Print_Chessboard();
 	}
 }
@@ -189,27 +180,30 @@ void CDCagent::MakeMove(const char move[6]) {
 int CDCagent::FlipList ( int *flip_moves ) {
 	int res = 0;
 	for(int i=0;i<32;i++) {
-		if(this->Board[i] == CHESS_COVER) {
+		int a = locate(this->Board, i);
+		//fprintf(stderr,"i = %d, a = %d\n",i,a);
+		if(a == CHESS_COVER) {
 			flip_moves[res++] = i*100+i;
 		}
 	}
 	return (res);
 }
-int CDCagent::NonFlipList ( int* Board,int color,int *non_flip_moves ) {
+int CDCagent::NonFlipList (unsigned  int* Board,int color,int *non_flip_moves ) {
 	int res = 0;
 	for(int i=0;i<32;i++) {
-		if ( Board[i] >= 0 && Board[i]/7 == color ) {
-			if ( Board[i] % 7 == 1 ) { // Cannon
-				int row = i/4;
-				int col = i%4;
+		if ( locate(Board,i) > 0 && div8[locate(Board,i)] == color ) {
+			if ( div8[locate(Board,i)] == 1 ) { // Cannon
+				int row = div4[i], col = mod4[i];
 				for ( int rowCount=row*4; rowCount<(row+1)*4; rowCount++ ) {
 					if ( IsLegal(Board,i,rowCount,color)) {
 						non_flip_moves[res++] = i*100+rowCount;
+						fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),rowCount);
 					}
 				}
 				for(int colCount=col; colCount<32;colCount += 4) {
 					if(IsLegal(Board,i,colCount,color)) {
 						non_flip_moves[res++] = i*100+colCount;
+						fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),colCount);
 					}
 				}
 			}
@@ -218,6 +212,7 @@ int CDCagent::NonFlipList ( int* Board,int color,int *non_flip_moves ) {
 				for(int k=0; k<4;k++) {
 					if(Move[k] >= 0 && Move[k] < 32 && IsLegal(Board,i,Move[k],color)) {
 						non_flip_moves[res++] = i*100+Move[k];
+						fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),Move[k]);
 					}
 				}
 			}
@@ -225,42 +220,52 @@ int CDCagent::NonFlipList ( int* Board,int color,int *non_flip_moves ) {
 	}
 	return (res);
 }
+int CDCagent::locate(unsigned int* Board, int index){//Board[num]]
+	return (Board[div8[index]] >> (mod8[index]*4)) & 15;
+}
+void CDCagent::modify(unsigned int* Board, int index, int value){
+	//fprintf(stderr, "modify:%u\n", (mod8[index]*4));
+	Board[div8[index]] &= (~(15 << (mod8[index]*4)));
+	Board[div8[index]] |= (value << (mod8[index]*4));
+	//fprintf(stderr, "modify:%u\n", Board[div8[index]]);
+}
 // judge if the move is legal
-bool CDCagent::IsLegal ( int* chess,int from_location_no,int to_location_no,int UserId ) {
+bool CDCagent::IsLegal (unsigned  int* chess,int from_location_no,int to_location_no,int UserId ) {
 	bool IsCurrent = true;
-	int from_chess_no = chess[from_location_no], to_chess_no = chess[to_location_no];
-	int from_row = from_location_no / 4, to_row = to_location_no / 4;
-	int from_col = from_location_no % 4, to_col = to_location_no % 4;
-	if(from_chess_no < 0 || ( to_chess_no < 0 && to_chess_no != CHESS_EMPTY) ) {  
-		IsCurrent = false;
+	int from_chess_no = locate(chess,from_location_no);
+	int to_chess_no = locate(chess,to_location_no);
+	int from_row = div4[from_location_no], to_row = div4[to_location_no];
+	int from_col = mod4[from_location_no], to_col = mod4[to_location_no];
+	if(mod8[from_chess_no] == 0 || to_chess_no == CHESS_COVER) {  
+		IsCurrent = false;//can't move from empty/can't move to/from cover
 	}
-	else if (from_chess_no >= 0 && from_chess_no / 7 != UserId) {
-		IsCurrent = false;
+	else if (div8[from_chess_no] != UserId) {
+		IsCurrent = false;//can't move oppenent's 
 	}
-	else if((from_chess_no / 7 == to_chess_no / 7) && to_chess_no >= 0) {
-		IsCurrent = false;
+	else if(to_chess_no != CHESS_EMPTY && (div8[from_chess_no] == div8[to_chess_no])) {
+		IsCurrent = false;//can't eat friend
 	}
 	else if(to_chess_no == CHESS_EMPTY && abs(from_row-to_row) + abs(from_col-to_col)  == 1){ //legal move 
 		IsCurrent = true;
 	}	
-	else if(from_chess_no % 7 == 1 ) { //judge cannon
+	else if(mod8[from_chess_no] == 6) { //judge cannon eat
 		int row_gap = from_row-to_row;
 		int col_gap = from_col-to_col;
 		int between_Count = 0;
-		if(from_row-to_row == 0 || from_col-to_col == 0) {
+		if(row_gap == 0 || col_gap == 0) {
 			if(row_gap == 0)  {
 				for(int i=1;i<abs(col_gap);i++) {
 					int between_chess;
-					if(col_gap>0) { between_chess = chess[from_location_no-i] ; }
-					else { between_chess = chess[from_location_no+i] ; }
+					if(col_gap>0) { between_chess = locate(chess,from_location_no-i);}
+					else { between_chess = locate(chess,from_location_no+i) ; }
 					if(between_chess != CHESS_EMPTY) { between_Count++; }
 				}
 			}
 			else {
 				for(int i=1;i<abs(row_gap);i++) {
 					int between_chess;
-					if(row_gap > 0) { between_chess = chess[from_location_no-4*i] ; }
-					else { between_chess = chess[from_location_no+4*i] ; }
+					if(row_gap > 0) { between_chess = locate(chess,from_location_no-4*i);}
+					else { between_chess = locate(chess,from_location_no+4*i);}
 					if(between_chess != CHESS_EMPTY) { between_Count++; }
 				}
 			}
@@ -275,19 +280,19 @@ bool CDCagent::IsLegal ( int* chess,int from_location_no,int to_location_no,int 
 			IsCurrent = false;
 		}
 	}
-	else { // non cannon
+	else { // non cannon eat
 		if( abs(from_row-to_row) + abs(from_col-to_col)  > 1) {
 			IsCurrent = false;
 		}
-		else if(from_chess_no % 7 == 0) {
-			if(to_chess_no % 7 != 0 && to_chess_no % 7 != 6) {
+		else if(mod8[from_chess_no] == 7) {//pawn
+			if(mod8[to_chess_no] != 1 && mod8[to_chess_no] != 7) {//pawn or king
 				IsCurrent = false;
 			}
 		}
-		else if(from_chess_no % 7 == 6 && to_chess_no % 7 == 0) {
+		else if(mod8[from_chess_no] == 1 && mod8[to_chess_no] == 7) {//king can't eat pawn
 			IsCurrent = false;
 		}
-		else if(from_chess_no % 7 < to_chess_no% 7) {
+		else if(mod8[from_chess_no] > mod8[to_chess_no]) {
 			IsCurrent = false;
 		}
 	}
@@ -309,20 +314,31 @@ void CDCagent::Print_Chessboard () {
 	else {
 		strcpy(myColor,"Black");
 	}
-	sprintf(temp,"------------%s-------------\n",myColor);
+	sprintf(temp,"------------%s-------------",myColor);
 	strcat(Mes,temp);
-	strcat(Mes,"<8> ");
-	for(int i=0;i<32;i++){
-		if(i != 0 && i % 4 == 0){
-			sprintf(temp,"\n<%d> ",8-(i/4));
-			strcat(Mes,temp);
+	for(int i = 3; i >= 0; i--){
+		for(int j = 16; j >= 0; j-=16){
+			int judge = (j == 16)? 1 : 0;
+			sprintf(temp,"\n<%d> ",i*2 + judge+1);strcat(Mes,temp);
+			for(int k = j; k < j+16; k+=4){
+				sprintf(temp,"%5c",chess_name[(this->Board[i] >> k) & 15]);
+				strcat(Mes,temp);
+			}
 		}
-		char chess_name[10]="";
-		Print_Chess(this->Board[i],chess_name);
-		sprintf(temp,"%5s", chess_name);
-		strcat(Mes,temp);
 	}
-	strcat(Mes,"\n\n     ");
+
+	// strcat(Mes,"<8> ");
+	// for(int i=0;i<32;i++){
+	// 	if(i != 0 && i % 4 == 0){
+	// 		sprintf(temp,"\n<%d> ",8-(i/4));
+	// 		strcat(Mes,temp);
+	// 	}
+	// 	char chess_name[10]="";
+	// 	Print_Chess(this->Board[i],chess_name);
+	// 	sprintf(temp,"%5s", chess_name);
+	// 	strcat(Mes,temp);
+	// }
+	strcat(Mes,"\n     ");
 	for(int i=0;i<4;i++){
 		sprintf(temp," <%c> ",'a'+i);
 		strcat(Mes,temp);
@@ -354,10 +370,12 @@ void CDCagent::Play(char move[6]) {
 	int total_non_flip = this->NonFlipList(this->Board, this->Color, non_flip_moves);
 	int flip_moves[32];
 	int total_flip = this->FlipList(flip_moves);
-	//fprintf(stderr, "non_flip: %d, flip: %d\n", total_non_flip, total_flip);
+	fprintf(stderr, "non_flip: %d, flip: %d\n", total_non_flip, total_flip);
 
 	// move decision (searching happens here)
 	int Answer = 0;
+	if
+
 	
 	#ifdef RANDOM // random decision on move
 	// if able to do non-flip move
@@ -371,10 +389,11 @@ void CDCagent::Play(char move[6]) {
 	}
 	#endif
 
+	fprintf(stderr, "Answer: %d\n", Answer);
 	// move translation 
 	int startPoint = Answer/100;
 	int endPoint   = Answer%100;
-	sprintf(move, "%c%c-%c%c",'a'+(startPoint%4),'1'+(7-startPoint/4),'a'+(endPoint%4),'1'+(7-endPoint/4));
+	sprintf(move, "%c%c-%c%c",'a'+(mod4[startPoint]),'1'+div4[startPoint],'a'+mod4[endPoint],'1'+div4[endPoint]);
 	
 	char chess_Start[10] = "", chess_End[10] = "";
 	Print_Chess(Board[startPoint],chess_Start);

@@ -15,8 +15,8 @@
 
 #define RED 0
 #define BLACK 1
-#define CHESS_COVER -1
-#define CHESS_EMPTY -2
+#define CHESS_COVER 8
+#define CHESS_EMPTY 0
 #define COMMAND_NUM 18
 class CDCagent 
 {
@@ -77,16 +77,18 @@ public:
 	int ConvertChessNo(int input);
 	void initBoardState ();
 	int FlipList ( int *flip_moves );
-	int NonFlipList ( int* Board,int color,int *non_flip_moves );
-	bool IsLegal ( int* chess,int from_location_no,int to_location_no,int UserId );
+	int NonFlipList (unsigned  int* Board,int color,int *non_flip_moves );
+	bool IsLegal (unsigned  int* chess,int from_location_no,int to_location_no,int UserId );
 	void Print_Chessboard ();
 	void Print_Chess ( int chess_no,char *Result );
 	void Play(char move[6]);
 	void MakeMove(const char move[6]);
+	int locate(unsigned int* Board, int index);
+	void modify(unsigned int* Board, int index, int value);
 private:
 	int Color;
 	int Red_Time, Black_Time;
-	int Board[32];
+	unsigned int Board[4];
 	int CloseChess[14];
 };
 
