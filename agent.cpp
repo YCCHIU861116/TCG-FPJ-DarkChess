@@ -53,6 +53,7 @@ bool CDCagent::reset_board ( const char* data[], char* response ) {
 	this->Color = 2;
 	this->Red_Time = -1; // known
 	this->Black_Time = -1; // known
+	this->plies = 0;
 	this->initBoardState();
 	return 0;
 }
@@ -62,12 +63,14 @@ bool CDCagent::move ( const char* data[], char* response ) {
   char move[6];
 	sprintf(move, "%s-%s", data[0], data[1]);
 	this->MakeMove(move);
+	this->plies++;
 	return 0;
 }
 bool CDCagent::flip(const char* data[], char* response){
 	char move[6];
 	sprintf(move, "%s(%s)", data[0], data[1]);
 	this->MakeMove(move);
+	this->plies++;
 	return 0;
 }
 bool CDCagent::genmove ( const char* data[], char* response ) {
@@ -81,8 +84,10 @@ bool CDCagent::genmove ( const char* data[], char* response ) {
 	}
 	// genmove
 	char move[6];
+	//sprintf(response, "%s", "a1 a1");
 	this->Play(move);
 	sprintf(response, "%c%c %c%c", move[0], move[1], move[3], move[4]);
+	this->plies++;
 	return 0;
 }
 bool CDCagent::game_over ( const char* data[], char* response ) {
@@ -119,18 +124,41 @@ const int div4[32] = {0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,
 const int mod4[32] = {0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3};
 const int div8[32] = {0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3};
 const int mod8[32] = {0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7};
+
+const int Chess_digit[14] = {1, 2, 2, 2, 2, 2, 3, 1, 2, 2, 2, 2, 2, 3};
+const int cumulate_chessdigit[7] = {0,1,3,5,7,9,11};
+const int Chess_fullnum[14] = {1, 2, 2, 2, 2, 2, 5, 1, 2, 2, 2, 2, 2, 5};
+const int pos_value[32] = {0,1,1,0,1,2,2,1,2,3,3,2,3,4,4,3,3,4,4,3,2,3,3,2,1,2,2,1,0,1,1,0};
+const int canmove[256] = 
+{
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+1,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,
+1,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,
+1,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,
+1,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,
+1,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,
+1,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,
+1,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,
+1,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0
+};
 void CDCagent::initBoardState () {
 	// initial board
 	char iCurrentPosition[32];
-	for(int i = 0; i < 32; i++){ iCurrentPosition[i] = 'X'; }
-	int iPieceCount[14] = {1, 2, 2, 2, 2, 2, 5, 1, 2, 2, 2, 2, 2, 5};
+	for(int i = 0; i < 32; i++){ iCurrentPosition[i] = 'X'; }	
 
-	fprintf(stderr, "iPieceCount[14]:\n");
+	fprintf(stderr, "Chess_fullnum[14]:\n");
 	for(int i=0;i<14;i++) {
 		fprintf(stderr, "[ %c ]",chess_name[i]); 
 	} fprintf(stderr, "\n");
 	for(int i=0;i<14;i++) {
-		fprintf(stderr,"%4d",iPieceCount[i]); 
+		fprintf(stderr,"%4d",Chess_fullnum[i]); 
 	} fprintf(stderr, "\n");
 	fprintf(stderr,"iCurrentPosition[32]:\n");
 	puts("Let's start!");
@@ -148,12 +176,12 @@ void CDCagent::initBoardState () {
 	} fprintf(stderr, "\n"); 
 	fprintf(stderr, "\n\n\n");
 
-	memcpy(this->CloseChess,iPieceCount,sizeof(int)*14);
+	this->LiveChess = 190147925;//1011010101010110110101010101
 	//convert to my format
 	for(int i = 0; i < 4; i++){
 		this->Board[i] = 0;
 		for(int j = 0; j < 8; j++){
-			this->Board[i] += (1 << 4*j+3);
+			this->Board[i] += (1 << (4*j+3));
 		}
 	}
 	fprintf(stderr, "init:%u\n", this->Board[3]);
@@ -163,6 +191,7 @@ void CDCagent::initBoardState () {
 void CDCagent::MakeMove(const char move[6]) { 
 	int src, dst;
 	src = (move[1]-'1')*4+(move[0]-'a');
+	int src_chess = locate(this->Board,src);
 	fprintf(stderr, "%d\n", src);
 	if(move[2]=='('){ 
 		fprintf(stderr, "FLIP: %c%c = %c\n",move[0], move[1], move[3]); 
@@ -170,40 +199,46 @@ void CDCagent::MakeMove(const char move[6]) {
 		Print_Chessboard();
 	}else { 
 		dst = (move[4]-'1')*4+(move[3]-'a');
-		fprintf(stderr, "MOVE: %c%c - %c%c\n",move[0], move[1], move[3], move[4]); 
-		modify(this->Board,dst,locate(this->Board,src));
+		fprintf(stderr, "MOVE: %c%c - %c%c\n",move[0], move[1], move[3], move[4]);
+		int dst_chess = locate(this->Board,src); 
+		if(dst_chess != CHESS_EMPTY){
+			int dst_color = div8[dst_chess];
+			int dst_kind = mod8[dst_chess]-1;
+			this->LiveChess -= (1 << (dst_color*14+cumulate_chessdigit[dst_kind]));//low red high black
+		}
+		modify(this->Board,dst,src_chess);
 		modify(this->Board,src,CHESS_EMPTY);
 		Print_Chessboard();
 	}
 }
 //------------------------------------------ legal move generation -------------------------------------------
-int CDCagent::FlipList ( int *flip_moves ) {
+int CDCagent::FlipList (unsigned  int* Board, int *flip_moves ) {
 	int res = 0;
 	for(int i=0;i<32;i++) {
-		int a = locate(this->Board, i);
+		int a = locate(Board, i);
 		//fprintf(stderr,"i = %d, a = %d\n",i,a);
 		if(a == CHESS_COVER) {
-			flip_moves[res++] = i*100+i;
+			flip_moves[res++] = (i<<7)+i;
 		}
 	}
 	return (res);
 }
-int CDCagent::NonFlipList (unsigned  int* Board,int color,int *non_flip_moves ) {
+int CDCagent::NonFlipList (unsigned int* Board,int color,int *non_flip_moves ) {
 	int res = 0;
 	for(int i=0;i<32;i++) {
 		if ( locate(Board,i) > 0 && div8[locate(Board,i)] == color ) {
-			if ( div8[locate(Board,i)] == 1 ) { // Cannon
+			if ( mod8[locate(Board,i)] == 6 ) { // Cannon
 				int row = div4[i], col = mod4[i];
 				for ( int rowCount=row*4; rowCount<(row+1)*4; rowCount++ ) {
 					if ( IsLegal(Board,i,rowCount,color)) {
-						non_flip_moves[res++] = i*100+rowCount;
-						fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),rowCount);
+						non_flip_moves[res++] = (i<<7)+rowCount;
+						//fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),rowCount);
 					}
 				}
 				for(int colCount=col; colCount<32;colCount += 4) {
 					if(IsLegal(Board,i,colCount,color)) {
-						non_flip_moves[res++] = i*100+colCount;
-						fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),colCount);
+						non_flip_moves[res++] = (i<<7)+colCount;
+						//fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),colCount);
 					}
 				}
 			}
@@ -211,8 +246,8 @@ int CDCagent::NonFlipList (unsigned  int* Board,int color,int *non_flip_moves ) 
 				int Move[4] = {i-4,i+1,i+4,i-1};
 				for(int k=0; k<4;k++) {
 					if(Move[k] >= 0 && Move[k] < 32 && IsLegal(Board,i,Move[k],color)) {
-						non_flip_moves[res++] = i*100+Move[k];
-						fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),Move[k]);
+						non_flip_moves[res++] = (i<<7)+Move[k];
+						//fprintf(stderr, "from = %d(%d),to = %d\n", i,locate(Board,i),Move[k]);
 					}
 				}
 			}
@@ -364,35 +399,112 @@ void CDCagent::Print_Chess ( int chess_no,char *Result ) {
 	}
 }
 //-------------------------------------------- playing function ----------------------------------------------
+
+int CDCagent::firststep(){
+	fprintf(stderr, "firststep\n" );
+	int opponent_pos, opponent_kind,find = 0;
+	for(int i = 0; i < 32 && !find; i++){
+		int t = locate(this->Board, i);
+		if(t != CHESS_COVER){
+			find = 1;
+			opponent_pos = i;
+			opponent_kind = mod8[t];
+		}
+	}
+	fprintf(stderr, "oppenent_pos:%d,opponent_kind:%d\n", opponent_pos,opponent_kind);
+	int max = 0, maxvalue = -1;
+	if(opponent_kind == 1 || opponent_kind == 6 || opponent_kind == 7){//K/C/P
+		int canditates[4] = {opponent_pos+1,opponent_pos-1,opponent_pos+4,opponent_pos-4};
+		for(int i = 0; i < 4; i++){
+			int from_row = div4[opponent_pos], to_row = div4[canditates[i]];
+			int from_col = mod4[opponent_pos], to_col = mod4[canditates[i]];
+			int row_gap = from_row-to_row, col_gap = from_col-to_col;
+			if(canditates[i] >= 0 && canditates[i] <32 && abs(row_gap)+abs(col_gap)==1){
+				if(pos_value[canditates[i]] >maxvalue){
+					maxvalue = pos_value[canditates[i]];
+					max = canditates[i];
+				}
+			}
+		}
+	}
+	else{
+		int canditates[4] = {opponent_pos+2,opponent_pos-2,opponent_pos+8,opponent_pos-8};
+		for(int i = 0; i < 4; i++){
+			int from_row = div4[opponent_pos], to_row = div4[canditates[i]];
+			int from_col = mod4[opponent_pos], to_col = mod4[canditates[i]];
+			int row_gap = from_row-to_row, col_gap = from_col-to_col;
+			if(canditates[i] > 0 && canditates[i] <32 && abs(row_gap)+abs(col_gap)==2){
+				if(pos_value[canditates[i]] >maxvalue){
+					maxvalue = pos_value[canditates[i]];
+					max = canditates[i];
+				}
+			}
+		}
+	}
+	fprintf(stderr, "Answer in firststep:%d,%d\n",max, (max<<7)+ max);
+	return (max<<7)+max;
+}
+
+// int SEE(unsigned int *Board){
+// 	for(int i = 0; i < 32; i++){
+// 		int surruond[4] = {i+1,i-1,i+4,i-4};
+// 		int chess_no = locate(Board,i);
+// 		if(chess_no == CHESS_COVER || chess_no == CHESS_EMPTY) continue;
+
+// 		int chess_color = div8[chess_no];
+// 		int chess_kind = mod8[chess_no]-1;
+// 		for(int j = 0; j < 4; j++){
+// 			if(surruond[j] >= 0 && surruond[j] < 32){
+// 				int from_row = div4[i], to_row = div4[surruond[j]];
+// 				int from_col = mod4[i], to_col = mod4[surruond[j]];
+// 				int row_gap = from_row-to_row, col_gap = from_col-to_col;
+// 				int surruond_chess = locate(Board,surruond[j]);
+// 				if(surruond_chess == CHESS_COVER || surruond_chess == CHESS_EMPTY) continue;
+// 				if((abs(row_gap)+abs(col_gap)==1))
+// 					chess_value_sum += ((chess_color==this->Color)?div4_basic[chess_kind]:-div4_basic[chess_kind]);
+// 			}
+// 		}
+// 	}
+// }
+
 void CDCagent::Play(char move[6]) {
 	// move generation	
-	int non_flip_moves[100];
+	int non_flip_moves[128];
 	int total_non_flip = this->NonFlipList(this->Board, this->Color, non_flip_moves);
 	int flip_moves[32];
-	int total_flip = this->FlipList(flip_moves);
+	int total_flip = this->FlipList(this->Board,flip_moves);
 	fprintf(stderr, "non_flip: %d, flip: %d\n", total_non_flip, total_flip);
 
 	// move decision (searching happens here)
-	int Answer = 0;
-	if
-
+	int Answer = 129,depth_limit = 10;//time_to_depth((this->color)? this->Red_Time:this->Black_Time);
 	
-	#ifdef RANDOM // random decision on move
-	// if able to do non-flip move
-	if ( total_non_flip > 0 ) {
-		Answer = non_flip_moves[rand()%total_non_flip];
-	} else if ( total_flip > 0 ) {
-		Answer = flip_moves[rand()%total_flip];
-	} else {
-		fprintf(stderr, "ERROR: no legal move\n");
-		exit(1);
+	if(this->plies == 0) Answer = ((21<<7)+21);
+	else if(this->plies == 1) Answer = firststep();
+	else{
+		if(total_non_flip > 0){
+			if(total_non_flip == 1){
+				Answer = non_flip_moves[0];
+			}
+			else{
+				// int a= SEE(this->Board);
+				// if(a != -1) Answer = a;
+				// else 
+					Answer = NegaMax(depth_limit);
+			}
+		}
+		else if(total_flip>0){
+			Answer = flip_moves[rand()%total_flip];
+		}
+		else {
+			fprintf(stderr, "ERROR: no legal move\n");
+			exit(1);
+		}
 	}
-	#endif
 
-	fprintf(stderr, "Answer: %d\n", Answer);
 	// move translation 
-	int startPoint = Answer/100;
-	int endPoint   = Answer%100;
+	int startPoint = Answer>>7;
+	int endPoint   = Answer & 127;
+	fprintf(stderr, "Answer: %d %d\n", startPoint,endPoint);
 	sprintf(move, "%c%c-%c%c",'a'+(mod4[startPoint]),'1'+div4[startPoint],'a'+mod4[endPoint],'1'+div4[endPoint]);
 	
 	char chess_Start[10] = "", chess_End[10] = "";
@@ -403,4 +515,178 @@ void CDCagent::Play(char move[6]) {
 	fprintf(stderr, "<%s> -> <%s>\n",chess_Start,chess_End);
 	fprintf(stderr, "move:%s\n",move);
 	this->Print_Chessboard();
+}
+
+int CDCagent::NegaMax(int depth_limit){
+	unsigned int tmp_board[4] = {this->Board[0],this->Board[1],this->Board[2],this->Board[3]};
+	unsigned int tmp_livechess = this->LiveChess;
+	int move = 0;
+	F4(tmp_board,tmp_livechess,-2147483640,2147483647,depth_limit, move);
+	return move;
+}
+
+const int basic_chess_value[7] = {6000,5000,2500,1000,500,1000,300};
+const int div4_basic[7] ={1500,1250,1125,250,125,250,75} ;
+
+int max(int a, int b){
+	return (a>b)?a:b;
+}
+
+int CDCagent::evaluate(unsigned int* Board,unsigned int LiveChess){
+	//return rand() %1000 +1000;
+	int chess_value_sum = 0;
+	int dynamic_chess_value[14];
+	int opponent_color = this->Color? RED:BLACK;
+	for(int i = 0; i < 7; i++){// dynamic modify chess value
+		int chess_no = this->Color*8+i;
+		dynamic_chess_value[i] = basic_chess_value[i];//TODO
+		dynamic_chess_value[7+i] = basic_chess_value[i];
+	}
+	for(int i = 0; i < 7; i++){
+		int chess_no = this->Color*8+i;
+		int livechessnum = (LiveChess>>(this->Color*14 + cumulate_chessdigit[i])) & (1<<Chess_digit[i]-1);
+		chess_value_sum += dynamic_chess_value[this->Color*7+i]*livechessnum;
+		chess_no = opponent_color*8+i;
+		livechessnum = (LiveChess>>(opponent_color*14 + cumulate_chessdigit[i])) & (1<<Chess_digit[i]-1);
+		chess_value_sum -= dynamic_chess_value[opponent_color*7+i]*livechessnum;
+	}
+	// freedom bonus
+	for(int i = 0; i < 32; i++){
+		int surruond[4] = {i+1,i-1,i+4,i-4};
+		int chess_no = locate(Board,i);
+		if(chess_no == CHESS_COVER || chess_no == CHESS_EMPTY) continue;
+
+		int chess_color = div8[chess_no];
+		int chess_kind = mod8[chess_no]-1;
+		for(int j = 0; j < 4; j++){
+			if(surruond[j] >= 0 && surruond[j] < 32){
+				int from_row = div4[i], to_row = div4[surruond[j]];
+				int from_col = mod4[i], to_col = mod4[surruond[j]];
+				int row_gap = from_row-to_row, col_gap = from_col-to_col;
+				int surruond_chess = locate(Board,surruond[j]);
+				if((abs(row_gap)+abs(col_gap)==1) && canmove[chess_no*16+surruond_chess])
+					chess_value_sum += ((chess_color==this->Color)?div4_basic[chess_kind]:-div4_basic[chess_kind]);
+			}
+		}
+	}
+	//fprintf(stderr, "evaluate: %d\n", chess_value_sum);
+	fflush(stderr);
+	return chess_value_sum;
+}
+
+/*int CDCagent::move_order(unsigned int* Board, unsigned int& LiveChess, int* non_flip_moves, int* flip_moves, int total_non_flip,int total_flip){
+	if ( total_non_flip > 0 ) {
+		//for(int i = 0; i < )
+	}
+	else if ( total_flip > 0 ) {
+		return flip_moves[rand()%total_flip];
+	} 
+	else {
+		fprintf(stderr, "ERROR: no legal move\n");
+		exit(1);
+	}
+}*/
+
+void CDCagent::do_move(unsigned int* Board, unsigned int& LiveChess, int move, int flip) { 
+	int src = move>>7;
+	int dst = move&127;
+	int src_chess = locate(Board,src);
+	//fprintf(stderr, "%d\n", src);
+	if(src == dst){ 
+		//fprintf(stderr, "FLIP: %c%c = %c\n",move[0], move[1], move[3]);
+		modify(Board,src,flip);
+		//Print_Chessboard();
+	}else { 
+		//fprintf(stderr, "MOVE: %c%c - %c%c\n",move[0], move[1], move[3], move[4]);
+		int dst_chess = locate(Board,src); 
+		if(dst_chess != CHESS_EMPTY){
+			int dst_color = div8[dst_chess];
+			int dst_kind = mod8[dst_chess]-1;
+			LiveChess -= (1 << (dst_color*14+cumulate_chessdigit[dst_kind]));//low red high black
+		}
+		modify(Board,dst,src_chess);
+		modify(Board,src,CHESS_EMPTY);
+		//Print_Chessboard();
+	}
+}
+
+int CDCagent::F4(unsigned int* Board,unsigned int LiveChess, int alpha, int beta, int depth, int& answer){
+	//fprintf(stderr,"depth = %d\n",depth);
+	if(depth == 0){
+		return evaluate(Board, LiveChess);
+	}
+
+	// move generation	
+	int opponent_color = (this->Color)? RED: BLACK;
+	int Color = (depth &1)? opponent_color:this->Color;
+	int non_flip_moves[128];
+	int total_non_flip = NonFlipList(Board, Color, non_flip_moves);
+	int flip_moves[32];
+	int total_flip = FlipList(Board, flip_moves);
+	//fprintf(stderr, "non_flip: %d, flip: %d\n", total_non_flip, total_flip);
+
+	int m = -2147483647, n = beta;
+	int best_move,answer_next;
+	for(int i = 0; i < total_non_flip; i++){
+		int move = non_flip_moves[i];
+		int src = move >>7, dst = move & 127;
+		unsigned int tmp_board[4] = {Board[0],Board[1],Board[2],Board[3]},tmp_livechess = LiveChess;
+		do_move(tmp_board,tmp_livechess,move,0);
+		int t = -F4(tmp_board,tmp_livechess,-n,-max(alpha,m),depth-1,answer_next);
+		//fprintf(stderr, "depth %d src:%d dst: %d ",depth, src,dst);
+		//fprintf(stderr, "has scout value: %d\n",t);
+		if(t > m){
+			best_move = move;
+			if(n == beta || depth < 3 || t >= beta){
+				m = t;
+			}
+			else
+				m = -F4(tmp_board,tmp_livechess,-beta,-t,depth-1,answer_next);
+		}
+		if(m >= beta){//beta cutoff
+			answer = move;
+			return m;
+		}
+		n = max(alpha,m) + 1;
+	}
+	//chance_node
+	unsigned int CoverChess = LiveChess;
+	int CoverChessnum[14];
+	if(total_flip < 3){
+		for(int i =0; i < 32; i++){
+			int chess_no = locate(Board,i);
+			int chess_color = div8[chess_no];
+			int chess_kind = mod8[chess_no]-1;
+			if(chess_no != CHESS_COVER || chess_no != CHESS_EMPTY){
+				CoverChess -= (1 << (chess_color*14 + cumulate_chessdigit[chess_kind]));
+			}
+		}
+		for(int i = 0; i < 7; i++){
+			CoverChessnum[i] = (CoverChess>>(cumulate_chessdigit[i])) & (1<<Chess_digit[i]-1);
+			CoverChessnum[7+i] = (CoverChess>>(14+cumulate_chessdigit[i])) & (1<<Chess_digit[i]-1);
+		}
+		for(int i = 0; i < total_flip; i++){
+			int move = flip_moves[i];
+			unsigned int tmp_board[4] = {Board[0],Board[1],Board[2],Board[3]},tmp_livechess = LiveChess;
+			int exp = 0;
+			for(int j = 0; j < 14; j++){
+				if(CoverChessnum[j] > 0){
+					int chess_no = (j < 7)? j+1 : j+2;
+					do_move(tmp_board, tmp_livechess, move, chess_no);
+					exp += -F4(tmp_board,tmp_livechess,-beta,-alpha,depth-1,answer_next)/total_flip*CoverChessnum[j];
+				}
+			}//
+			if(exp > m){
+				m = exp;
+				best_move = move;
+			}
+		}
+	}
+	if(m == -2147483647){
+		int tmp = evaluate(Board,LiveChess);
+		m = (depth & 1)? -tmp:tmp;
+	} 
+	//fprintf(stderr, "depth %d best_move:%d, max:%d\n",depth,best_move,m);
+	answer = best_move;
+	return m;
 }

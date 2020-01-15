@@ -18,6 +18,14 @@
 #define CHESS_COVER 8
 #define CHESS_EMPTY 0
 #define COMMAND_NUM 18
+struct table_entry
+{
+	unsigned int board[4];
+	int depth;
+	int best;
+	int best_move;
+	int exact;//exact / beta cut off
+};
 class CDCagent 
 {
 enum { 
@@ -76,20 +84,30 @@ public:
 public:
 	int ConvertChessNo(int input);
 	void initBoardState ();
-	int FlipList ( int *flip_moves );
+	int FlipList (unsigned  int* Board, int *flip_moves );
 	int NonFlipList (unsigned  int* Board,int color,int *non_flip_moves );
 	bool IsLegal (unsigned  int* chess,int from_location_no,int to_location_no,int UserId );
 	void Print_Chessboard ();
 	void Print_Chess ( int chess_no,char *Result );
+	int firststep();
 	void Play(char move[6]);
 	void MakeMove(const char move[6]);
 	int locate(unsigned int* Board, int index);
 	void modify(unsigned int* Board, int index, int value);
+	int evaluate(unsigned int* Board,unsigned int LiveChess);
+	void do_move(unsigned int* Board, unsigned int& LiveChess, int move, int flip) ;
+	//int move_order(unsigned int* Board, unsigned int& LiveChess, int* non_flip_moves, int* flip_moves, int total_non_flip,int total_flip);
+	int NegaMax(int depth_limit);
+	int F4(unsigned int* Board,unsigned int LiveChess, int alpha, int beta, int depth, int& answer);
 private:
 	int Color;
+	int plies;
 	int Red_Time, Black_Time;
 	unsigned int Board[4];
-	int CloseChess[14];
+	unsigned int LiveChess;
+	// unsigned int hash_p;
+	// int my_hash_table[];
+	// int oppo_hash_table[];
 };
 
 

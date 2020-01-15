@@ -73,8 +73,9 @@ int main(){
 
     write[0] = '\0'; // empty the char array
 
+    
     isFailed = (myai.*functions[id])(data, write);
-
+    
     if(strlen(write) > 0){
       if(isFailed){
         sprintf(output, "?%d %s\n", id, write);
@@ -88,13 +89,11 @@ int main(){
         sprintf(output, "=%d\n", id);
       }
     }
-
     fprintf(stdout, "%s", output);
     //fprintf(stderr, "%s", output);
     // important, do not delete
     fflush(stdout);
     fflush(stderr);
-
   }while(id != QUIT);
 
   return 0;
