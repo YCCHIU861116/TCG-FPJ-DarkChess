@@ -9,6 +9,7 @@
 CDCagent::CDCagent ( void ) { this->Color = 2; }
 CDCagent::~CDCagent ( void ) {}
 
+struct table_entry trans_table[2][HASH_TABLE_SIZE];
 //-----------------------------------------------DCTP protocol------------------------------------------------
 bool CDCagent::protocol_version ( const char* data[], char* response ) {
 	strcpy(response, "1.0.0");
@@ -55,6 +56,10 @@ bool CDCagent::reset_board ( const char* data[], char* response ) {
 	this->Black_Time = -1; // known
 	this->plies = 0;
 	this->initBoardState();
+	this->hash_value = 0;
+	for(int i = 0; i < 32; i++) this->hash_value ^= random_num[8*32+i];
+	memset(trans_table[0],0,sizeof(table_entry)*HASH_TABLE_SIZE);
+	memset(trans_table[1],0,sizeof(table_entry)*HASH_TABLE_SIZE);
 	return 0;
 }
 bool CDCagent::num_repetition ( const char* data[], char* response ) { return 0; }
@@ -77,8 +82,10 @@ bool CDCagent::genmove ( const char* data[], char* response ) {
 	// set color
 	if(!strcmp(data[0], "red")){
 		this->Color = RED;
+		//if(this-plies == 0) this->hash_value ^= color_rand[this->Color];
 	}else if(!strcmp(data[0], "black")){
 		this->Color = BLACK;
+		//if(this-plies == 0) this->hash_value ^= color_rand[this->Color];
 	}else{
 		this->Color = 2;
 	}
@@ -120,6 +127,7 @@ int GetFin(char c) {
 	}
 	return -1;
 }
+
 const int div4[32] = {0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7,7,7};
 const int mod4[32] = {0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3};
 const int div8[32] = {0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3};
@@ -148,6 +156,8 @@ const int canmove[256] =
 1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0
 };
+const int basic_chess_value[7] = {6000,5000,2500,1000,500,1000,300};
+const int div4_basic[7] ={1500,1250,1125,250,125,250,75} ;
 void CDCagent::initBoardState () {
 	// initial board
 	char iCurrentPosition[32];
@@ -192,10 +202,16 @@ void CDCagent::MakeMove(const char move[6]) {
 	int src, dst;
 	src = (move[1]-'1')*4+(move[0]-'a');
 	int src_chess = locate(this->Board,src);
-	fprintf(stderr, "%d\n", src);
+	//int opponent_color = this->Color? RED:BLACK;
+	// this->hash_value ^= color_rand[this->Color];
+	// this->hash_value ^= color_rand[opponent_color];
+	//fprintf(stderr, "%d\n", src);
 	if(move[2]=='('){ 
-		fprintf(stderr, "FLIP: %c%c = %c\n",move[0], move[1], move[3]); 
-		modify(this->Board,src,GetFin(move[3]));
+		fprintf(stderr, "FLIP: %c%c = %c\n",move[0], move[1], move[3]);
+		int dst_chess = GetFin(move[3]); 
+		modify(this->Board,src,dst_chess);
+		this->hash_value ^= random_num[CHESS_COVER*32+src];
+		this->hash_value ^= random_num[dst_chess*32+src];
 		Print_Chessboard();
 	}else { 
 		dst = (move[4]-'1')*4+(move[3]-'a');
@@ -205,7 +221,11 @@ void CDCagent::MakeMove(const char move[6]) {
 			int dst_color = div8[dst_chess];
 			int dst_kind = mod8[dst_chess]-1;
 			this->LiveChess -= (1 << (dst_color*14+cumulate_chessdigit[dst_kind]));//low red high black
-		}
+		}		
+		this->hash_value ^= random_num[dst_chess*32+dst];
+		this->hash_value ^= random_num[src_chess*32+dst];
+		this->hash_value ^= random_num[src_chess*32+src];
+		this->hash_value ^= random_num[CHESS_EMPTY*32+src];
 		modify(this->Board,dst,src_chess);
 		modify(this->Board,src,CHESS_EMPTY);
 		Print_Chessboard();
@@ -445,27 +465,46 @@ int CDCagent::firststep(){
 	return (max<<7)+max;
 }
 
-// int SEE(unsigned int *Board){
-// 	for(int i = 0; i < 32; i++){
-// 		int surruond[4] = {i+1,i-1,i+4,i-4};
-// 		int chess_no = locate(Board,i);
-// 		if(chess_no == CHESS_COVER || chess_no == CHESS_EMPTY) continue;
+int CDCagent::SEE(unsigned int *Board){
+	int best_move = -1, best_target = 0;
+	for(int i = 0; i < 32; i++){
+		int chess_no = locate(Board,i);
+		int chess_color = div8[chess_no];
+		int chess_kind = mod8[chess_no]-1;
+		if(chess_no == CHESS_COVER || chess_no == CHESS_EMPTY || chess_color != this->Color) continue;
 
-// 		int chess_color = div8[chess_no];
-// 		int chess_kind = mod8[chess_no]-1;
-// 		for(int j = 0; j < 4; j++){
-// 			if(surruond[j] >= 0 && surruond[j] < 32){
-// 				int from_row = div4[i], to_row = div4[surruond[j]];
-// 				int from_col = mod4[i], to_col = mod4[surruond[j]];
-// 				int row_gap = from_row-to_row, col_gap = from_col-to_col;
-// 				int surruond_chess = locate(Board,surruond[j]);
-// 				if(surruond_chess == CHESS_COVER || surruond_chess == CHESS_EMPTY) continue;
-// 				if((abs(row_gap)+abs(col_gap)==1))
-// 					chess_value_sum += ((chess_color==this->Color)?div4_basic[chess_kind]:-div4_basic[chess_kind]);
-// 			}
-// 		}
-// 	}
-// }
+		int surround[4] = {i+1,i-1,i+4,i-4};
+		for(int j = 0; j < 4; j++){
+			if(surround[j] >= 0 && surround[j] < 32){
+				int from_row = div4[i], to_row = div4[surround[j]];
+				int from_col = mod4[i], to_col = mod4[surround[j]];
+				int row_gap = from_row-to_row, col_gap = from_col-to_col;
+				int dst_chess = locate(Board,surround[j]);
+				int dst_kind = mod8[dst_chess]-1;
+				if(dst_chess == CHESS_COVER || dst_chess == CHESS_EMPTY) continue;
+				if((abs(row_gap)+abs(col_gap)==1)){
+					if(canmove[chess_no*16+dst_chess] && basic_chess_value[dst_kind] > best_target){//capture
+						best_move = (i << 7) + surround[j];
+						best_target = basic_chess_value[dst_kind];
+					}
+					else if(canmove[dst_chess*16+chess_no] && basic_chess_value[chess_kind] > best_target){//threaten
+						for(int k = 0; k < 4; k++){
+							if(surround[k] >= 0 && surround[k] < 32){
+								int dst_row = div4[surround[k]],dst_col = mod4[surround[k]];
+								int run_chess = locate(Board,surround[k]);
+								if((abs(from_row-dst_row)+abs(from_col-dst_col) == 1) && canmove[chess_no*16+run_chess]){
+									best_move = (i << 7) + surround[k];
+									best_target = basic_chess_value[chess_kind];
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return best_move;
+}
 
 void CDCagent::Play(char move[6]) {
 	// move generation	
@@ -486,9 +525,9 @@ void CDCagent::Play(char move[6]) {
 				Answer = non_flip_moves[0];
 			}
 			else{
-				// int a= SEE(this->Board);
-				// if(a != -1) Answer = a;
-				// else 
+				int a= SEE(this->Board);
+				if(a != -1) Answer = a;
+				else 
 					Answer = NegaMax(depth_limit);
 			}
 		}
@@ -500,7 +539,6 @@ void CDCagent::Play(char move[6]) {
 			exit(1);
 		}
 	}
-
 	// move translation 
 	int startPoint = Answer>>7;
 	int endPoint   = Answer & 127;
@@ -520,13 +558,12 @@ void CDCagent::Play(char move[6]) {
 int CDCagent::NegaMax(int depth_limit){
 	unsigned int tmp_board[4] = {this->Board[0],this->Board[1],this->Board[2],this->Board[3]};
 	unsigned int tmp_livechess = this->LiveChess;
+	long long int tmp_hash_value = this->hash_value;
 	int move = 0;
-	F4(tmp_board,tmp_livechess,-2147483640,2147483647,depth_limit, move);
+	F4(tmp_board,tmp_livechess,tmp_hash_value,-2147483640,2147483647,depth_limit, move);
 	return move;
 }
 
-const int basic_chess_value[7] = {6000,5000,2500,1000,500,1000,300};
-const int div4_basic[7] ={1500,1250,1125,250,125,250,75} ;
 
 int max(int a, int b){
 	return (a>b)?a:b;
@@ -538,33 +575,33 @@ int CDCagent::evaluate(unsigned int* Board,unsigned int LiveChess){
 	int dynamic_chess_value[14];
 	int opponent_color = this->Color? RED:BLACK;
 	for(int i = 0; i < 7; i++){// dynamic modify chess value
-		int chess_no = this->Color*8+i;
+		//int chess_no = this->Color*8+i;
 		dynamic_chess_value[i] = basic_chess_value[i];//TODO
 		dynamic_chess_value[7+i] = basic_chess_value[i];
 	}
 	for(int i = 0; i < 7; i++){
-		int chess_no = this->Color*8+i;
-		int livechessnum = (LiveChess>>(this->Color*14 + cumulate_chessdigit[i])) & (1<<Chess_digit[i]-1);
+		//int chess_no = this->Color*8+i;
+		int livechessnum = (LiveChess>>(this->Color*14 + cumulate_chessdigit[i])) & ((1<<Chess_digit[i])-1);
 		chess_value_sum += dynamic_chess_value[this->Color*7+i]*livechessnum;
-		chess_no = opponent_color*8+i;
-		livechessnum = (LiveChess>>(opponent_color*14 + cumulate_chessdigit[i])) & (1<<Chess_digit[i]-1);
+		//chess_no = opponent_color*8+i;
+		livechessnum = (LiveChess>>(opponent_color*14 + cumulate_chessdigit[i])) & ((1<<Chess_digit[i])-1);
 		chess_value_sum -= dynamic_chess_value[opponent_color*7+i]*livechessnum;
 	}
 	// freedom bonus
 	for(int i = 0; i < 32; i++){
-		int surruond[4] = {i+1,i-1,i+4,i-4};
+		int surround[4] = {i+1,i-1,i+4,i-4};
 		int chess_no = locate(Board,i);
 		if(chess_no == CHESS_COVER || chess_no == CHESS_EMPTY) continue;
 
 		int chess_color = div8[chess_no];
 		int chess_kind = mod8[chess_no]-1;
 		for(int j = 0; j < 4; j++){
-			if(surruond[j] >= 0 && surruond[j] < 32){
-				int from_row = div4[i], to_row = div4[surruond[j]];
-				int from_col = mod4[i], to_col = mod4[surruond[j]];
+			if(surround[j] >= 0 && surround[j] < 32){
+				int from_row = div4[i], to_row = div4[surround[j]];
+				int from_col = mod4[i], to_col = mod4[surround[j]];
 				int row_gap = from_row-to_row, col_gap = from_col-to_col;
-				int surruond_chess = locate(Board,surruond[j]);
-				if((abs(row_gap)+abs(col_gap)==1) && canmove[chess_no*16+surruond_chess])
+				int surround_chess = locate(Board,surround[j]);
+				if((abs(row_gap)+abs(col_gap)==1) && canmove[chess_no*16+surround_chess])
 					chess_value_sum += ((chess_color==this->Color)?div4_basic[chess_kind]:-div4_basic[chess_kind]);
 			}
 		}
@@ -574,31 +611,44 @@ int CDCagent::evaluate(unsigned int* Board,unsigned int LiveChess){
 	return chess_value_sum;
 }
 
-/*int CDCagent::move_order(unsigned int* Board, unsigned int& LiveChess, int* non_flip_moves, int* flip_moves, int total_non_flip,int total_flip){
-	if ( total_non_flip > 0 ) {
-		//for(int i = 0; i < )
+void CDCagent::move_order(unsigned int* Board, int* non_flip_moves, int total_non_flip){
+	int best_value = 0,best_i = 0;
+	for(int i = 0; i <total_non_flip; i++){
+		int src = non_flip_moves[i]>>7;
+		int chess_no = locate(Board,src);
+		int chess_kind = mod8[chess_no]-1;
+		if(basic_chess_value[chess_kind] > best_value){
+			best_value = basic_chess_value[chess_kind];
+			best_i = i;
+		}
 	}
-	else if ( total_flip > 0 ) {
-		return flip_moves[rand()%total_flip];
-	} 
-	else {
-		fprintf(stderr, "ERROR: no legal move\n");
-		exit(1);
-	}
-}*/
+	int tmp = non_flip_moves[0];
+	non_flip_moves[0] = non_flip_moves[best_i];
+	non_flip_moves[best_i] = tmp;
+}
 
-void CDCagent::do_move(unsigned int* Board, unsigned int& LiveChess, int move, int flip) { 
+void CDCagent::do_move(unsigned int* Board, unsigned int& LiveChess,long long int &hash_value, int move, int flip) { 
 	int src = move>>7;
 	int dst = move&127;
 	int src_chess = locate(Board,src);
+	//int my_color = div8[src_chess];
+	//int opponent_color = my_color? RED : BLACK;
+	// hash_value ^= color_rand[opponent_color];
+	// hash_value ^= color_rand[my_color];
 	//fprintf(stderr, "%d\n", src);
 	if(src == dst){ 
 		//fprintf(stderr, "FLIP: %c%c = %c\n",move[0], move[1], move[3]);
 		modify(Board,src,flip);
+		hash_value ^= random_num[8*32+src];
+		hash_value ^= random_num[flip*32+src];
 		//Print_Chessboard();
 	}else { 
 		//fprintf(stderr, "MOVE: %c%c - %c%c\n",move[0], move[1], move[3], move[4]);
 		int dst_chess = locate(Board,src); 
+		hash_value ^= random_num[dst_chess*32+dst];
+		hash_value ^= random_num[src_chess*32+dst];
+		hash_value ^= random_num[src_chess*32+src];
+		hash_value ^= random_num[CHESS_EMPTY*32+src];
 		if(dst_chess != CHESS_EMPTY){
 			int dst_color = div8[dst_chess];
 			int dst_kind = mod8[dst_chess]-1;
@@ -610,29 +660,74 @@ void CDCagent::do_move(unsigned int* Board, unsigned int& LiveChess, int move, i
 	}
 }
 
-int CDCagent::F4(unsigned int* Board,unsigned int LiveChess, int alpha, int beta, int depth, int& answer){
+int CDCagent::F4(unsigned int* Board,unsigned int LiveChess,long long int hash_value, int alpha, int beta, int depth, int& answer){
 	//fprintf(stderr,"depth = %d\n",depth);
 	if(depth == 0){
 		return evaluate(Board, LiveChess);
 	}
 
-	// move generation	
 	int opponent_color = (this->Color)? RED: BLACK;
 	int Color = (depth &1)? opponent_color:this->Color;
+	int m = -2147483647, n = beta;
+	int best_move,answer_next;
+	int hash_index = hash_value & ((1 << HASH_TABLE_SIZE_N) - 1);
+	table_entry* cur = &trans_table[Color][hash_index];
+	if(cur->exact > 0){
+		if(cur->hash_value == hash_value){
+			//fprintf(stderr, "depth:%d hash hit!\n",depth);
+			if(cur->depth < depth){
+				if (cur->exact == 1){
+					best_move = cur->best_move;
+					m = cur->best_value;
+				}
+			}
+			else{
+				if(cur->exact == 1){
+					answer = cur->best_move;
+					return cur->best_value;
+				}
+				if(cur->exact == 2){
+					if(cur->best_value > m){
+						m = cur->best_value;
+						best_move = cur->best_move;
+					}
+					if(m >= beta){
+						answer = best_move;
+						return m;
+					}
+				}
+				else{
+					if(cur->best_value < n){
+						n = cur->best_value;
+						best_move = cur->best_move;
+					}
+					if(n <= alpha){
+						answer = best_move;
+						return n;
+					}
+				}
+			}
+		}
+		// else
+		// 	fprintf(stderr, "depth:%d collision!\n",depth);
+	}
+
+	// move generation	
 	int non_flip_moves[128];
 	int total_non_flip = NonFlipList(Board, Color, non_flip_moves);
 	int flip_moves[32];
 	int total_flip = FlipList(Board, flip_moves);
 	//fprintf(stderr, "non_flip: %d, flip: %d\n", total_non_flip, total_flip);
-
-	int m = -2147483647, n = beta;
-	int best_move,answer_next;
+	if(total_non_flip > 0){
+		move_order(Board,non_flip_moves,total_non_flip);
+	}
 	for(int i = 0; i < total_non_flip; i++){
 		int move = non_flip_moves[i];
-		int src = move >>7, dst = move & 127;
+		//int src = move >>7, dst = move & 127;
 		unsigned int tmp_board[4] = {Board[0],Board[1],Board[2],Board[3]},tmp_livechess = LiveChess;
-		do_move(tmp_board,tmp_livechess,move,0);
-		int t = -F4(tmp_board,tmp_livechess,-n,-max(alpha,m),depth-1,answer_next);
+		long long int tmp_hash_value = hash_value;
+		do_move(tmp_board,tmp_livechess,tmp_hash_value,move,0);
+		int t = -F4(tmp_board,tmp_livechess,tmp_hash_value,-n,-max(alpha,m),depth-1,answer_next);
 		//fprintf(stderr, "depth %d src:%d dst: %d ",depth, src,dst);
 		//fprintf(stderr, "has scout value: %d\n",t);
 		if(t > m){
@@ -641,10 +736,15 @@ int CDCagent::F4(unsigned int* Board,unsigned int LiveChess, int alpha, int beta
 				m = t;
 			}
 			else
-				m = -F4(tmp_board,tmp_livechess,-beta,-t,depth-1,answer_next);
+				m = -F4(tmp_board,tmp_livechess,tmp_hash_value,-beta,-t,depth-1,answer_next);
 		}
 		if(m >= beta){//beta cutoff
 			answer = move;
+			cur->hash_value = hash_value;
+			cur->depth = depth;
+			cur->best_value = m;
+			cur->best_move = answer;
+			cur->exact = 2;
 			return m;
 		}
 		n = max(alpha,m) + 1;
@@ -662,23 +762,35 @@ int CDCagent::F4(unsigned int* Board,unsigned int LiveChess, int alpha, int beta
 			}
 		}
 		for(int i = 0; i < 7; i++){
-			CoverChessnum[i] = (CoverChess>>(cumulate_chessdigit[i])) & (1<<Chess_digit[i]-1);
-			CoverChessnum[7+i] = (CoverChess>>(14+cumulate_chessdigit[i])) & (1<<Chess_digit[i]-1);
+			CoverChessnum[i] = (CoverChess>>(cumulate_chessdigit[i])) & ((1<<Chess_digit[i])-1);
+			CoverChessnum[7+i] = (CoverChess>>(14+cumulate_chessdigit[i])) & ((1<<Chess_digit[i])-1);
 		}
 		for(int i = 0; i < total_flip; i++){
 			int move = flip_moves[i];
 			unsigned int tmp_board[4] = {Board[0],Board[1],Board[2],Board[3]},tmp_livechess = LiveChess;
+			long long int tmp_hash_value = hash_value;
 			int exp = 0;
 			for(int j = 0; j < 14; j++){
 				if(CoverChessnum[j] > 0){
 					int chess_no = (j < 7)? j+1 : j+2;
-					do_move(tmp_board, tmp_livechess, move, chess_no);
-					exp += -F4(tmp_board,tmp_livechess,-beta,-alpha,depth-1,answer_next)/total_flip*CoverChessnum[j];
+					do_move(tmp_board, tmp_livechess,tmp_hash_value ,move, chess_no);
+					int tmp = evaluate(tmp_board,tmp_livechess);
+					int partial = (depth & 1)? -tmp:tmp;
+					exp += partial/total_flip*CoverChessnum[j];
 				}
 			}//
 			if(exp > m){
 				m = exp;
 				best_move = move;
+			}
+			if(m >= beta){//beta cutoff
+				answer = move;
+				cur->hash_value = hash_value;
+				cur->depth = depth;
+				cur->best_value = m;
+				cur->best_move = answer;
+				cur->exact = 2;
+				return m;
 			}
 		}
 	}
@@ -688,5 +800,10 @@ int CDCagent::F4(unsigned int* Board,unsigned int LiveChess, int alpha, int beta
 	} 
 	//fprintf(stderr, "depth %d best_move:%d, max:%d\n",depth,best_move,m);
 	answer = best_move;
+	cur->hash_value = hash_value;
+	cur->depth = depth;
+	cur->best_value = m;
+	cur->best_move = answer;
+	cur->exact = (m > alpha)?1:3;
 	return m;
 }
