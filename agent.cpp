@@ -57,6 +57,7 @@ bool CDCagent::reset_board ( const char* data[], char* response ) {
 	this->plies = 0;
 	this->initBoardState();
 	this->hash_value = 0;
+	this->repeat_num = 0;
 	for(int i = 0; i < 32; i++) this->hash_value ^= random_num[8*32+i];
 	memset(trans_table[0],0,sizeof(table_entry)*HASH_TABLE_SIZE);
 	memset(trans_table[1],0,sizeof(table_entry)*HASH_TABLE_SIZE);
@@ -473,6 +474,29 @@ int CDCagent::SEE(unsigned int *Board){
 		int chess_kind = mod8[chess_no]-1;
 		if(chess_no == CHESS_COVER || chess_no == CHESS_EMPTY || chess_color != this->Color) continue;
 
+		if(chess_kind == 5){//cannon
+			int row = div4[i], col = mod4[i];
+			for ( int rowCount=row*4; rowCount<(row+1)*4; rowCount++ ) {
+				if ( IsLegal(Board,i,rowCount,this->Color)) {
+					int dst_chess = locate(Board,rowCount);
+					int dst_kind = mod8[dst_chess]-1;
+					if(dst_kind > -1 && basic_chess_value[dst_kind] > best_target){
+						best_move = (i<<7)+rowCount;
+						best_target = basic_chess_value[dst_kind];
+					}
+				}
+			}
+			for(int colCount=col; colCount<32;colCount += 4) {
+				if(IsLegal(Board,i,colCount,this->Color)) {
+					int dst_chess = locate(Board,colCount);
+					int dst_kind = mod8[dst_chess]-1;
+					if(dst_kind > -1 && basic_chess_value[dst_kind] > best_target){
+						best_move = (i<<7)+colCount;
+						best_target = basic_chess_value[dst_kind];
+					}
+				}
+			}
+		}
 		int surround[4] = {i+1,i-1,i+4,i-4};
 		for(int j = 0; j < 4; j++){
 			if(surround[j] >= 0 && surround[j] < 32){
@@ -515,7 +539,8 @@ void CDCagent::Play(char move[6]) {
 	fprintf(stderr, "non_flip: %d, flip: %d\n", total_non_flip, total_flip);
 
 	// move decision (searching happens here)
-	int Answer = 129,depth_limit = 10;//time_to_depth((this->color)? this->Red_Time:this->Black_Time);
+	int mytime = (this->Color)? this->Black_Time : this->Red_Time;
+	int Answer = 129,depth_limit = (mytime < 300000)?4:10;//time_to_depth((this->color)? this->Red_Time:this->Black_Time);
 	
 	if(this->plies == 0) Answer = ((21<<7)+21);
 	else if(this->plies == 1) Answer = firststep();
@@ -537,6 +562,22 @@ void CDCagent::Play(char move[6]) {
 		else {
 			fprintf(stderr, "ERROR: no legal move\n");
 			exit(1);
+		}
+	}
+	if(Answer == this->b2move){
+		this->repeat_num++;
+	}
+	else{
+		this->repeat_num = 0;
+	}
+	this->b2move = this->b1move;
+	this->b1move = Answer;
+	if(this->repeat_num == 3){
+		if(total_flip>0){
+			Answer = flip_moves[rand()%total_flip];
+		}
+		else{
+			Answer = non_flip_moves[rand()%total_non_flip];
 		}
 	}
 	// move translation 
@@ -727,6 +768,7 @@ int CDCagent::F4(unsigned int* Board,unsigned int LiveChess,long long int hash_v
 		unsigned int tmp_board[4] = {Board[0],Board[1],Board[2],Board[3]},tmp_livechess = LiveChess;
 		long long int tmp_hash_value = hash_value;
 		do_move(tmp_board,tmp_livechess,tmp_hash_value,move,0);
+
 		int t = -F4(tmp_board,tmp_livechess,tmp_hash_value,-n,-max(alpha,m),depth-1,answer_next);
 		//fprintf(stderr, "depth %d src:%d dst: %d ",depth, src,dst);
 		//fprintf(stderr, "has scout value: %d\n",t);
@@ -752,7 +794,7 @@ int CDCagent::F4(unsigned int* Board,unsigned int LiveChess,long long int hash_v
 	//chance_node
 	unsigned int CoverChess = LiveChess;
 	int CoverChessnum[14];
-	if(total_flip < 3){
+	if(total_flip < 3 && Red_Time > 450000 && Black_Time > 450000){
 		for(int i =0; i < 32; i++){
 			int chess_no = locate(Board,i);
 			int chess_color = div8[chess_no];
@@ -776,7 +818,10 @@ int CDCagent::F4(unsigned int* Board,unsigned int LiveChess,long long int hash_v
 					do_move(tmp_board, tmp_livechess,tmp_hash_value ,move, chess_no);
 					int tmp = evaluate(tmp_board,tmp_livechess);
 					int partial = (depth & 1)? -tmp:tmp;
-					exp += partial/total_flip*CoverChessnum[j];
+					if(total_flip == 2)
+						exp += (partial>>1)*CoverChessnum[j];
+					else
+						exp += partial;
 				}
 			}//
 			if(exp > m){
